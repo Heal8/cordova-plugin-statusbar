@@ -22,6 +22,7 @@ package org.apache.cordova.statusbar;
 import android.graphics.Color;
 import android.os.Build;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowManager;
 
@@ -86,7 +87,26 @@ public class StatusBar extends CordovaPlugin {
             setStatusBarStyle(
                 preferences.getString("StatusBarStyle", STYLE_LIGHT_CONTENT).toLowerCase()
             );
+
+            disableAncestorSystemWindowFitting();
         });
+    }
+
+    // Prevent AppCompat ancestor views from applying their own padding for system-bar
+    // insets. CordovaActivity's rootLayout OnApplyWindowInsetsListener already accounts
+    // for those insets by sizing the statusBarView overlay and the WebView's top margin;
+    // when an ancestor also pads itself the offsets double-count. On API 27 this triggers
+    // visibly after IME show/hide once AppCompat re-evaluates fitsSystemWindows.
+    private void disableAncestorSystemWindowFitting() {
+        View content = activity.findViewById(android.R.id.content);
+        if (content == null) return;
+        ViewParent p = content.getParent();
+        while (p instanceof View) {
+            View v = (View) p;
+            v.setFitsSystemWindows(false);
+            v.setPadding(0, 0, 0, 0);
+            p = v.getParent();
+        }
     }
 
     /**
@@ -192,11 +212,13 @@ public class StatusBar extends CordovaPlugin {
 
     private void setStatusBarTransparent(final boolean isTransparent) {
         final Window window = cordova.getActivity().getWindow();
-        int visibility = isTransparent
-            ? View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            : View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_VISIBLE;
-
-        window.getDecorView().setSystemUiVisibility(visibility);
+        // Keep SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN always set so window insets propagate to
+        // CordovaActivity's rootLayout OnApplyWindowInsetsListener, which sizes the
+        // statusBarView overlay. Clearing it lets AppCompat's FitWindowsLinearLayout
+        // swallow the insets and the overlay falls back to MATCH_PARENT, covering the WebView.
+        window.getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        );
 
         if (isTransparent) {
             window.setStatusBarColor(Color.TRANSPARENT);
